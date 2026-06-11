@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import db from '@/lib/db';
+import { one, tx } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
 import { planOf } from '@/lib/plans';
+import { apiHandler } from '@/lib/api';
 
 // Pequeno parser de CSV com suporte a campos entre aspas.
 function parseCsv(text) {
@@ -48,7 +49,7 @@ function mapHeaders(headerRow) {
   return map;
 }
 
-export async function POST(req) {
+export const POST = apiHandler(async (req) => {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Não autenticado.' }, { status: 401 });
 
@@ -68,29 +69,28 @@ export async function POST(req) {
   }
 
   const plan = planOf(user);
-  let count = db.prepare('SELECT COUNT(*) AS n FROM patients WHERE user_id = ?').get(user.id).n;
+  let count = (await one('SELECT COUNT(*)::int AS n FROM patients WHERE user_id = $1', [user.id])).n;
 
-  const insert = db.prepare(
-    'INSERT INTO patients (user_id, name, email, phone, last_visit, last_treatment, consent) VALUES (?, ?, ?, ?, ?, ?, 1)'
-  );
   let imported = 0;
   let skipped = 0;
-  const tx = db.transaction(() => {
+  await tx(async (client) => {
     for (const row of rows.slice(1)) {
       const name = (row[map.name] || '').trim();
       if (!name) { skipped++; continue; }
       if (count >= plan.maxPatients) { skipped++; continue; }
       const get = (f) => (map[f] !== undefined ? (row[map[f]] || '').trim() || null : null);
-      insert.run(user.id, name, get('email'), get('phone'), get('last_visit'), get('last_treatment'));
+      await client.query(
+        'INSERT INTO patients (user_id, name, email, phone, last_visit, last_treatment, consent) VALUES ($1, $2, $3, $4, $5, $6, 1)',
+        [user.id, name, get('email'), get('phone'), get('last_visit'), get('last_treatment')]
+      );
       imported++;
       count++;
     }
   });
-  tx();
 
   const limitNote =
     skipped > 0 && plan.maxPatients !== Infinity && count >= plan.maxPatients
       ? ' Atingiu o limite do plano — passe a Premium para importar todos.'
       : '';
   return NextResponse.json({ imported, skipped, note: limitNote });
-}
+});

@@ -1,15 +1,16 @@
 import Link from 'next/link';
-import db from '@/lib/db';
+import { q } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
 import { segmentOf, SEGMENTS } from '@/lib/segments';
 import { PLANS } from '@/lib/plans';
 
 export default async function DashboardPage() {
   const user = await getCurrentUser();
-  const patients = db.prepare('SELECT * FROM patients WHERE user_id = ?').all(user.id);
-  const campaigns = db
-    .prepare('SELECT * FROM campaigns WHERE user_id = ? ORDER BY created_at DESC LIMIT 5')
-    .all(user.id);
+  const patients = await q('SELECT * FROM patients WHERE user_id = $1', [user.id]);
+  const campaigns = await q(
+    'SELECT * FROM campaigns WHERE user_id = $1 ORDER BY created_at DESC LIMIT 5',
+    [user.id]
+  );
 
   const counts = { ativo: 0, inativos_6m: 0, inativos_12m: 0, inativos_24m: 0 };
   for (const p of patients) counts[segmentOf(p)]++;

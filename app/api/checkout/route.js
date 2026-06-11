@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server';
-import db from '@/lib/db';
+import { run } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
+import { apiHandler } from '@/lib/api';
 
-export async function POST() {
+export const POST = apiHandler(async () => {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Não autenticado.' }, { status: 401 });
   if (user.plan === 'premium') return NextResponse.json({ error: 'Já tem o plano Premium.' }, { status: 400 });
 
   // Modo de demonstração: ativa o Premium sem pagamento (apenas para demos comerciais).
   if (process.env.DEMO_UPGRADE === '1' && !process.env.STRIPE_SECRET_KEY) {
-    db.prepare("UPDATE users SET plan = 'premium' WHERE id = ?").run(user.id);
+    await run("UPDATE users SET plan = 'premium' WHERE id = $1", [user.id]);
     return NextResponse.json({ demo: true });
   }
 
@@ -35,4 +36,4 @@ export async function POST() {
   });
 
   return NextResponse.json({ url: session.url });
-}
+});

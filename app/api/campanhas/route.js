@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
-import db from '@/lib/db';
+import { q, one, run, tx } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
 import { planOf } from '@/lib/plans';
 import { contactablePatients, SEGMENTS } from '@/lib/segments';
 import { renderTemplate } from '@/lib/templates';
 import { sendEmail, smtpConfigured } from '@/lib/mailer';
+import { apiHandler } from '@/lib/api';
 
-export async function POST(req) {
+export const POST = apiHandler(async (req) => {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Não autenticado.' }, { status: 401 });
 
@@ -23,10 +24,11 @@ export async function POST(req) {
   }
 
   if (plan.maxCampaignsPerMonth !== Infinity) {
-    const thisMonth = db
-      .prepare("SELECT COUNT(*) AS n FROM campaigns WHERE user_id = ? AND created_at >= date('now','start of month')")
-      .get(user.id).n;
-    if (thisMonth >= plan.maxCampaignsPerMonth) {
+    const { n } = await one(
+      "SELECT COUNT(*)::int AS n FROM campaigns WHERE user_id = $1 AND created_at >= date_trunc('month', now())",
+      [user.id]
+    );
+    if (n >= plan.maxCampaignsPerMonth) {
       return NextResponse.json(
         { error: `O plano ${plan.label} permite ${plan.maxCampaignsPerMonth} campanha por mês. Passe a Premium para campanhas ilimitadas.` },
         { status: 402 }
@@ -34,20 +36,24 @@ export async function POST(req) {
     }
   }
 
-  const patients = db.prepare('SELECT * FROM patients WHERE user_id = ?').all(user.id);
+  const patients = await q('SELECT * FROM patients WHERE user_id = $1', [user.id]);
   const recipients = contactablePatients(patients, segment, channel);
   if (recipients.length === 0) {
     return NextResponse.json({ error: 'Não há pacientes contactáveis neste segmento.' }, { status: 400 });
   }
 
-  const result = db
-    .prepare('INSERT INTO campaigns (user_id, name, segment, channel, subject, body) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(user.id, (name || 'Campanha').trim(), segment, channel, subject?.trim() || null, body.trim());
-  const campaignId = result.lastInsertRowid;
-
-  const insertRecipient = db.prepare(
-    'INSERT INTO campaign_recipients (campaign_id, patient_id, status) VALUES (?, ?, ?)'
+  const campaign = await one(
+    'INSERT INTO campaigns (user_id, name, segment, channel, subject, body) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+    [user.id, (name || 'Campanha').trim(), segment, channel, subject?.trim() || null, body.trim()]
   );
+  const campaignId = campaign.id;
+
+  const insertRecipient = (patientId, status) =>
+    run('INSERT INTO campaign_recipients (campaign_id, patient_id, status) VALUES ($1, $2, $3)', [
+      campaignId,
+      patientId,
+      status,
+    ]);
 
   let sent = 0;
   let failed = 0;
@@ -61,28 +67,32 @@ export async function POST(req) {
           subject: renderTemplate(subject, vars),
           text: renderTemplate(body, vars),
         });
-        insertRecipient.run(campaignId, p.id, 'enviado');
+        await insertRecipient(p.id, 'enviado');
         sent++;
       } catch {
-        insertRecipient.run(campaignId, p.id, 'falhou');
+        await insertRecipient(p.id, 'falhou');
         failed++;
       }
     }
   } else {
     // Sem SMTP (ou canal SMS): a campanha fica pronta para exportação manual.
-    const tx = db.transaction(() => {
-      for (const p of recipients) insertRecipient.run(campaignId, p.id, 'pendente');
+    await tx(async (client) => {
+      for (const p of recipients) {
+        await client.query(
+          "INSERT INTO campaign_recipients (campaign_id, patient_id, status) VALUES ($1, $2, 'pendente')",
+          [campaignId, p.id]
+        );
+      }
     });
-    tx();
     sent = recipients.length;
   }
 
-  db.prepare('UPDATE campaigns SET sent_count = ? WHERE id = ?').run(recipients.length, campaignId);
+  await run('UPDATE campaigns SET sent_count = $1 WHERE id = $2', [recipients.length, campaignId]);
 
   return NextResponse.json({
-    id: Number(campaignId),
+    id: campaignId,
     sent,
     failed,
     delivery: channel === 'email' && smtpConfigured() ? 'smtp' : 'exportacao',
   });
-}
+});

@@ -1,4 +1,4 @@
-import db from '@/lib/db';
+import { q } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
 import { segmentOf, SEGMENTS } from '@/lib/segments';
 import { planOf } from '@/lib/plans';
@@ -15,9 +15,10 @@ const SEGMENT_CHIP = {
 export default async function PacientesPage() {
   const user = await getCurrentUser();
   const plan = planOf(user);
-  const patients = db
-    .prepare('SELECT * FROM patients WHERE user_id = ? ORDER BY last_visit ASC')
-    .all(user.id);
+  const patients = await q(
+    'SELECT * FROM patients WHERE user_id = $1 ORDER BY last_visit ASC NULLS FIRST',
+    [user.id]
+  );
 
   return (
     <>

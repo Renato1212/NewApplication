@@ -1,17 +1,18 @@
 import { NextResponse } from 'next/server';
-import db from '@/lib/db';
+import { q, one } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
 import { planOf } from '@/lib/plans';
 import { renderTemplate } from '@/lib/templates';
+import { apiHandler } from '@/lib/api';
 
 // Exporta a lista de contactos da campanha com a mensagem personalizada,
 // pronta a colar num gateway de SMS ou cliente de email.
-export async function GET(req, { params }) {
+export const GET = apiHandler(async (req, { params }) => {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Não autenticado.' }, { status: 401 });
 
   const { id } = await params;
-  const campaign = db.prepare('SELECT * FROM campaigns WHERE id = ? AND user_id = ?').get(id, user.id);
+  const campaign = await one('SELECT * FROM campaigns WHERE id = $1 AND user_id = $2', [id, user.id]);
   if (!campaign) return NextResponse.json({ error: 'Campanha não encontrada.' }, { status: 404 });
 
   const plan = planOf(user);
@@ -19,13 +20,12 @@ export async function GET(req, { params }) {
     return NextResponse.json({ error: 'A exportação SMS está disponível no plano Premium.' }, { status: 402 });
   }
 
-  const rows = db
-    .prepare(
-      `SELECT p.name, p.email, p.phone FROM campaign_recipients r
-       JOIN patients p ON p.id = r.patient_id
-       WHERE r.campaign_id = ?`
-    )
-    .all(campaign.id);
+  const rows = await q(
+    `SELECT p.name, p.email, p.phone FROM campaign_recipients r
+     JOIN patients p ON p.id = r.patient_id
+     WHERE r.campaign_id = $1`,
+    [campaign.id]
+  );
 
   const esc = (v) => `"${String(v ?? '').replaceAll('"', '""')}"`;
   const contactCol = campaign.channel === 'sms' ? 'telefone' : 'email';
@@ -41,4 +41,4 @@ export async function GET(req, { params }) {
       'Content-Disposition': `attachment; filename="campanha-${campaign.id}.csv"`,
     },
   });
-}
+});

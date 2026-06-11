@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import db from '@/lib/db';
+import { q, one, fmtDate } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
 import { SEGMENTS } from '@/lib/segments';
 import RecoverButton from '@/components/RecoverButton';
@@ -15,16 +15,16 @@ const STATUS_CHIP = {
 export default async function CampanhaDetalhePage({ params }) {
   const user = await getCurrentUser();
   const { id } = await params;
-  const campaign = db.prepare('SELECT * FROM campaigns WHERE id = ? AND user_id = ?').get(id, user.id);
+  if (!/^\d+$/.test(id)) notFound();
+  const campaign = await one('SELECT * FROM campaigns WHERE id = $1 AND user_id = $2', [id, user.id]);
   if (!campaign) notFound();
 
-  const recipients = db
-    .prepare(
-      `SELECT r.*, p.name, p.email, p.phone FROM campaign_recipients r
-       JOIN patients p ON p.id = r.patient_id
-       WHERE r.campaign_id = ? ORDER BY r.id`
-    )
-    .all(campaign.id);
+  const recipients = await q(
+    `SELECT r.*, p.name, p.email, p.phone FROM campaign_recipients r
+     JOIN patients p ON p.id = r.patient_id
+     WHERE r.campaign_id = $1 ORDER BY r.id`,
+    [campaign.id]
+  );
 
   const recovered = recipients.filter((r) => r.status === 'recuperado');
   const revenue = recovered.reduce((s, r) => s + (r.recovered_value || 0), 0);
@@ -38,7 +38,7 @@ export default async function CampanhaDetalhePage({ params }) {
       <h1>{campaign.name}</h1>
       <p className="page-sub">
         {SEGMENTS[campaign.segment]?.label || campaign.segment} ·{' '}
-        {campaign.channel === 'sms' ? 'SMS' : 'Email'} · {campaign.created_at?.slice(0, 10)}
+        {campaign.channel === 'sms' ? 'SMS' : 'Email'} · {fmtDate(campaign.created_at)}
       </p>
 
       <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>

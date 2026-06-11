@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import db from '@/lib/db';
+import { run } from '@/lib/db';
 
 // Webhook do Stripe: ativa o Premium após o pagamento e desativa-o se a
 // subscrição for cancelada. Configure o endpoint no painel do Stripe com os
@@ -26,17 +26,18 @@ export async function POST(req) {
     const session = event.data.object;
     const userId = Number(session.client_reference_id);
     if (userId) {
-      db.prepare(
-        "UPDATE users SET plan = 'premium', stripe_customer_id = ?, stripe_subscription_id = ? WHERE id = ?"
-      ).run(session.customer ?? null, session.subscription ?? null, userId);
+      await run(
+        "UPDATE users SET plan = 'premium', stripe_customer_id = $1, stripe_subscription_id = $2 WHERE id = $3",
+        [session.customer ?? null, session.subscription ?? null, userId]
+      );
     }
   }
 
   if (event.type === 'customer.subscription.deleted') {
     const sub = event.data.object;
-    db.prepare("UPDATE users SET plan = 'gratis', stripe_subscription_id = NULL WHERE stripe_subscription_id = ?").run(
-      sub.id
-    );
+    await run("UPDATE users SET plan = 'gratis', stripe_subscription_id = NULL WHERE stripe_subscription_id = $1", [
+      sub.id,
+    ]);
   }
 
   return NextResponse.json({ received: true });

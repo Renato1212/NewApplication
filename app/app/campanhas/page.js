@@ -1,18 +1,17 @@
 import Link from 'next/link';
-import db from '@/lib/db';
+import { q, fmtDate } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
 import { SEGMENTS } from '@/lib/segments';
 
 export default async function CampanhasPage() {
   const user = await getCurrentUser();
-  const campaigns = db
-    .prepare(
-      `SELECT c.*,
-        (SELECT COUNT(*) FROM campaign_recipients r WHERE r.campaign_id = c.id AND r.status = 'recuperado') AS recovered,
-        (SELECT COALESCE(SUM(r.recovered_value), 0) FROM campaign_recipients r WHERE r.campaign_id = c.id) AS revenue
-       FROM campaigns c WHERE c.user_id = ? ORDER BY c.created_at DESC`
-    )
-    .all(user.id);
+  const campaigns = await q(
+    `SELECT c.*,
+      (SELECT COUNT(*)::int FROM campaign_recipients r WHERE r.campaign_id = c.id AND r.status = 'recuperado') AS recovered,
+      (SELECT COALESCE(SUM(r.recovered_value), 0)::float FROM campaign_recipients r WHERE r.campaign_id = c.id) AS revenue
+     FROM campaigns c WHERE c.user_id = $1 ORDER BY c.created_at DESC`,
+    [user.id]
+  );
 
   return (
     <>
@@ -70,7 +69,7 @@ export default async function CampanhasPage() {
                     {c.recovered > 0 ? <span className="chip chip-green">{c.recovered}</span> : '—'}
                   </td>
                   <td>{c.revenue > 0 ? `€${c.revenue.toLocaleString('pt-PT')}` : '—'}</td>
-                  <td>{c.created_at?.slice(0, 10)}</td>
+                  <td>{fmtDate(c.created_at)}</td>
                 </tr>
               ))}
             </tbody>

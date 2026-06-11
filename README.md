@@ -44,33 +44,42 @@ npm run dev          # desenvolvimento — http://localhost:3000
 npm run build && npm start   # produção
 ```
 
-A base de dados (SQLite) é criada automaticamente em `data/cadeiracheia.db`.
+Precisa de uma base de dados **Postgres** (variável `DATABASE_URL`). O esquema é criado
+automaticamente no primeiro acesso.
+
+## Publicar na Vercel (recomendado)
+
+1. Importe o repositório na Vercel (deploy normal de Next.js).
+2. No projeto, abra **Storage → Create Database → Neon (Postgres, grátis)** e ligue-a ao
+   projeto — a variável `DATABASE_URL` é injetada automaticamente.
+3. Em **Settings → Environment Variables**, adicione `AUTH_SECRET` (segredo longo e aleatório)
+   e, quando quiser cobrar, as variáveis do Stripe (abaixo).
+4. Faça **Redeploy**. Pronto.
 
 ## Configuração de produção
 
 Copie `.env.example` para `.env` e preencha:
 
-1. **`AUTH_SECRET`** — segredo longo e aleatório para as sessões (obrigatório).
-2. **Stripe** (pagamentos do Premium):
+1. **`DATABASE_URL`** — ligação Postgres (Neon, Supabase, ou um Postgres próprio).
+2. **`AUTH_SECRET`** — segredo longo e aleatório para as sessões (obrigatório).
+3. **Stripe** (pagamentos do Premium):
    - Crie um produto "CadeiraCheia Premium" com preço recorrente de €49/mês;
    - Preencha `STRIPE_SECRET_KEY` e `STRIPE_PRICE_ID`;
    - Crie um webhook para `https://o-seu-dominio/api/stripe/webhook` com os eventos
      `checkout.session.completed` e `customer.subscription.deleted` e preencha
      `STRIPE_WEBHOOK_SECRET`.
-3. **SMTP** (envio das campanhas de email) — qualquer fornecedor: Brevo, Mailgun, Amazon SES…
+4. **SMTP** (envio das campanhas de email) — qualquer fornecedor: Brevo, Mailgun, Amazon SES…
    Sem SMTP, as campanhas ficam disponíveis para exportação em CSV personalizado.
-4. **`DEMO_UPGRADE=1`** — apenas para demonstrações comerciais: ativa o Premium sem pagamento.
+5. **`DEMO_UPGRADE=1`** — apenas para demonstrações comerciais: ativa o Premium sem pagamento.
 
-### Alojamento
+### Alojamento alternativo (VPS europeu)
 
-A aplicação usa SQLite em disco, por isso precisa de um servidor com armazenamento persistente:
-um VPS (Hetzner, OVH, Scaleway — fornecedores europeus, dados na UE), Railway ou Fly.io com
-volume. Para dezenas/centenas de clínicas, SQLite é mais do que suficiente.
+Funciona em qualquer servidor Node com acesso a um Postgres — por exemplo um VPS na Hetzner,
+OVH ou Scaleway (fornecedores europeus, dados na UE):
 
 ```bash
-# exemplo num VPS
 npm ci && npm run build
-AUTH_SECRET=... APP_URL=https://cadeiracheia.pt npm start
+DATABASE_URL=postgres://... AUTH_SECRET=... APP_URL=https://cadeiracheia.pt npm start
 ```
 
 ## Demonstração rápida a um cliente
